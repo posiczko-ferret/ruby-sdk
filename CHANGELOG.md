@@ -1,3 +1,12 @@
+## Unreleased
+
+* **Breaking:** Require Ruby 3.3 or newer. Ruby 3.0, 3.1 and 3.2 are end-of-life.
+
+* Support Ruby 3.4 and 4.0:
+  * Replace `OpenStruct` (no longer bundled with Ruby 4.0) with `Struct` in `Procore::OAuthError`.
+  * Add `pstore` as a runtime dependency (no longer bundled with Ruby 4.0).
+  * Fix `Procore::Auth::Stores::File` failing to load saved tokens on Ruby 3.4+ (`Psych::DisallowedClass`).
+
 ## 1.3.1 (Jan 9, 2024)
 
 * Fix a bug with the retry logic in `with_response_handling` resulting in performing one more retry than expected .

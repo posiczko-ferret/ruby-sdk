@@ -14,7 +14,7 @@ Gem::Specification.new do |spec|
   spec.description           = "Procore Ruby Gem"
   spec.homepage              = "https://github.com/procore-oss/ruby-sdk"
   spec.license               = "MIT"
-  spec.required_ruby_version = Gem::Requirement.new('>= 3.0')
+  spec.required_ruby_version = Gem::Requirement.new('>= 3.3')
 
   spec.files         = `git ls-files -z`.split("\x0").reject do |f|
     f.match(%r{^(test|spec|features)/})
