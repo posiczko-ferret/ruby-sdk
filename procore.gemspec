@@ -26,8 +26,10 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "actionpack"
   spec.add_development_dependency "activerecord"
   spec.add_development_dependency "bundler"
+  spec.add_development_dependency "bundler-audit"
   spec.add_development_dependency "dalli"
   spec.add_development_dependency "fakefs"
+  spec.add_development_dependency "irb"
   spec.add_development_dependency "minitest"
   spec.add_development_dependency "minitest-mock"
   spec.add_development_dependency "pry"
@@ -41,9 +43,12 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "webmock"
 
   spec.add_dependency "activesupport", "> 2.4"
+  spec.add_dependency "faraday", "~> 2.0"
+  spec.add_dependency "faraday-multipart", "~> 1.0"
+  spec.add_dependency "faraday-retry", "~> 2.0"
+  spec.add_dependency "mime-types", "~> 3.0"
   spec.add_dependency "oauth2", "~> 2.0"
   spec.add_dependency "pstore"
-  spec.add_dependency "rest-client", "~> 2.0"
 
   spec.metadata['allowed_push_host'] = 'https://rubygems.org'
   spec.metadata['rubygems_mfa_required'] = 'true'

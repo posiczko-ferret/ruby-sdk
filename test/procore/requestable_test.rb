@@ -29,15 +29,16 @@ class Procore::RequestableTest < Minitest::Test
     Procore.configuration.max_retries = max_retries_old
   end
 
-  # Runs the block with retry backoff recorded instead of slept.
+  # Runs the block with retry backoff recorded instead of slept. Covers both
+  # the retry middleware and the access-token retry in Requestable.
   #
   # @return [Array<Float>] the waits requested, in order
   def record_sleeps(request)
-    sleeps = []
-    request.stub(:sleep, ->(seconds) { sleeps << seconds }) do
+    RetrySleeps.recorded.clear
+    request.stub(:sleep, ->(seconds) { RetrySleeps.recorded << seconds }) do
       yield
     end
-    sleeps
+    RetrySleeps.recorded.dup
   end
 
   def headers
@@ -318,6 +319,22 @@ class Procore::RequestableTest < Minitest::Test
     refute_includes output.string, "secret-token"
   end
 
+  def test_logs_request_id
+    stub_request(:get, "http://test.com/rest/v1.0/home")
+      .to_return(status: 200, body: "", headers: { "X-Request-Id" => "req-123" })
+    output = StringIO.new
+    logger_old = Procore.configuration.logger
+    Procore.configuration.logger = Logger.new(output)
+
+    begin
+      Request.new(token: "token").get("home")
+    ensure
+      Procore.configuration.logger = logger_old
+    end
+
+    assert_includes output.string, "req-123"
+  end
+
   def test_post_with_multipart_body
     request = stub_request(:post, "http://test.com/rest/v1.0/home")
       .with(
@@ -441,6 +458,35 @@ class Procore::RequestableTest < Minitest::Test
       "home",
       body: { file: pixel, description: "A pixel" },
     )
+
+    assert_requested request
+  end
+
+  def test_post_multipart_sends_file_content_type
+    request = stub_request(:post, "http://test.com/rest/v1.0/home")
+      .with { |req|
+        req.body.match?(/filename="pixel.png"\r\nContent-Length: \d+\r\nContent-Type: image\/png/)
+      }
+      .to_return(status: 200, body: "", headers: {})
+
+    pixel = File.new("test/support/pixel.png", "r")
+
+    Request.new(token: "token").post("home", body: { file: pixel })
+
+    assert_requested request
+  end
+
+  def test_post_multipart_sends_file_arrays
+    request = stub_request(:post, "http://test.com/rest/v1.0/home")
+      .with { |req| req.body.scan('filename="pixel.png"').size == 2 }
+      .to_return(status: 200, body: "", headers: {})
+
+    files = [
+      File.new("test/support/pixel.png", "r"),
+      File.new("test/support/pixel.png", "r"),
+    ]
+
+    Request.new(token: "token").post("home", body: { files: files })
 
     assert_requested request
   end
@@ -591,6 +637,41 @@ class Procore::RequestableTest < Minitest::Test
 
     assert_equal({ "ok" => true }, response.body)
     assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 2
+  end
+
+  def test_retries_read_timeout
+    stub_request(:get, "http://test.com/rest/v1.0/retry_test")
+      .to_raise(Net::ReadTimeout)
+    request = Request.new(token: "token")
+
+    with_max_retries(1) do
+      record_sleeps(request) do
+        assert_raises(Procore::APIConnectionError) do
+          request.get("retry_test")
+        end
+      end
+    end
+
+    assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 2
+  end
+
+  def test_access_token_failure_raises_connection_error_after_retries
+    client = Request.new(token: "token")
+    failing_token = -> { raise Procore::OAuthError.new("Token refresh failed") }
+
+    error = nil
+
+    with_max_retries(1) do
+      record_sleeps(client) do
+        client.stub(:access_token, failing_token) do
+          error = assert_raises(Procore::APIConnectionError) do
+            client.get("home")
+          end
+        end
+      end
+    end
+
+    assert_instance_of Procore::OAuthError, error.cause
   end
 
   def test_retries_connection_refused

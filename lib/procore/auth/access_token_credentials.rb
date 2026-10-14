@@ -39,7 +39,7 @@ module Procore
           token: token.access_token,
         }
         client.request(:post, "/oauth/revoke", body: request)
-      rescue RestClient::ExceptionWithResponse
+      rescue OAuth2::Error => e
         raise OAuthError.new(e.description, response: e.response)
       end
 

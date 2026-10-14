@@ -3,7 +3,10 @@ require "dalli"
 
 class Procore::Auth::Stores::DalliTest < Minitest::Test
   def setup
-    @store = Procore::Auth::Stores::Dalli.new(key: "key", dalli: Dalli::Client.new)
+    @store = Procore::Auth::Stores::Dalli.new(
+      key: "key",
+      dalli: Dalli::Client.new(nil, serializer: Dalli::JSONSerializer),
+    )
     @store.save(
       Procore::Auth::Token.new(
         access_token: "token",
