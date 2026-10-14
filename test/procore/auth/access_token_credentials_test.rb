@@ -58,11 +58,11 @@ class Procore::Auth::ClientCredentialsTest < Minitest::Test
       credentials.refresh(token: "token", refresh: "refresh")
     end
 
-    assert_equal error.response.code, 500
-    assert_equal error.response.body, "<html><body><h1>This is very bad</h1></body></html>"
-    assert_equal error.response.headers, "content-type" => "text/html"
+    assert_equal 500, error.response.code
+    assert_equal "<html><body><h1>This is very bad</h1></body></html>", error.response.body
+    assert_equal({ "content-type" => "text/html" }, error.response.headers)
     assert_nil error.response.request.path
-    assert_equal error.response.request.options, {}
+    assert_equal({}, error.response.request.options)
   end
 
   def test_oauth_client_error_with_json
@@ -89,11 +89,11 @@ class Procore::Auth::ClientCredentialsTest < Minitest::Test
       credentials.refresh(token: "token", refresh: "refresh")
     end
 
-    assert_equal error.response.code, 500
-    assert_equal error.response.body, "error" => "Some bad error"
-    assert_equal error.response.headers, "content-type" => "application/json"
+    assert_equal 500, error.response.code
+    assert_equal({ "error" => "Some bad error" }, error.response.body)
+    assert_equal({ "content-type" => "application/json" }, error.response.headers)
     assert_nil error.response.request.path
-    assert_equal error.response.request.options, {}
+    assert_equal({}, error.response.request.options)
   end
 
   def test_connection_failed_error
@@ -136,6 +136,6 @@ class Procore::Auth::ClientCredentialsTest < Minitest::Test
       credentials.refresh(token: "token", refresh: "refresh")
     end
 
-    assert_equal error.message, "Host is not a valid URI. Check your host option to make sure it is a properly formed url"
+    assert_equal "Host is not a valid URI. Check your host option to make sure it is a properly formed url", error.message
   end
 end

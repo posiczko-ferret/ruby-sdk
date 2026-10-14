@@ -21,6 +21,25 @@ class Procore::RequestableTest < Minitest::Test
     end
   end
 
+  def with_max_retries(count)
+    max_retries_old = Procore.configuration.max_retries
+    Procore.configuration.max_retries = count
+    yield
+  ensure
+    Procore.configuration.max_retries = max_retries_old
+  end
+
+  # Runs the block with retry backoff recorded instead of slept.
+  #
+  # @return [Array<Float>] the waits requested, in order
+  def record_sleeps(request)
+    sleeps = []
+    request.stub(:sleep, ->(seconds) { sleeps << seconds }) do
+      yield
+    end
+    sleeps
+  end
+
   def headers
     {
       "Accepts" => "application/json",
@@ -217,7 +236,7 @@ class Procore::RequestableTest < Minitest::Test
         errors: { id: ["Entity with this ID not found"] },
       }],
     }
-    assert response.body, expected_body
+    assert_equal expected_body.deep_stringify_keys, response.body
   end
 
   def test_post_with_idempotency_token
@@ -326,11 +345,11 @@ class Procore::RequestableTest < Minitest::Test
         headers: {},
       )
 
-    begin
+    error = assert_raises Procore::AuthorizationError do
       Request.new(token: "token").get("")
-    rescue Procore::AuthorizationError => e
-      assert_equal({ "errors" => "Unauthorized" }, e.response.body)
     end
+
+    assert_equal({ "errors" => "Unauthorized" }, error.response.body)
   end
 
   def test_no_retry_logic
@@ -340,7 +359,7 @@ class Procore::RequestableTest < Minitest::Test
     begin
       Procore.configuration.max_retries = 0
       stub_request(:get, "http://test.com/rest/v1.0/retry_test")
-        .to_raise(RestClient::Exceptions::Timeout)
+        .to_timeout
 
       # Attempt to perform the request and assert the correct exception is raised
       assert_raises(Procore::APIConnectionError) do
@@ -351,5 +370,295 @@ class Procore::RequestableTest < Minitest::Test
     ensure
       Procore.configuration.max_retries = max_retries_old
     end
+  end
+
+  def test_get_encodes_nested_query
+    request = stub_request(:get, "http://test.com/rest/v1.0/home")
+      .with(query: { filters: { status: "open", ids: [1, 2] }, per_page: 5 })
+      .to_return(status: 200, body: "", headers: {})
+
+    Request.new(token: "token").get(
+      "home",
+      query: { filters: { status: "open", ids: [1, 2] }, per_page: 5 },
+    )
+
+    assert_requested request
+  end
+
+  def test_delete_with_query
+    request = stub_request(:delete, "http://test.com/rest/v1.0/home")
+      .with(query: { force: true }, headers: headers)
+      .to_return(status: 200, body: "", headers: {})
+
+    Request.new(token: "token").delete("home", query: { force: true })
+
+    assert_requested request
+  end
+
+  def test_post_multipart_sends_file_and_fields
+    request = stub_request(:post, "http://test.com/rest/v1.0/home")
+      .with { |req|
+        req.body.include?('name="file"; filename="pixel.png"') &&
+          req.body.include?('name="description"') &&
+          req.body.include?("A pixel")
+      }
+      .to_return(status: 200, body: "", headers: {})
+
+    pixel = File.new("test/support/pixel.png", "r")
+
+    Request.new(token: "token").post(
+      "home",
+      body: { file: pixel, description: "A pixel" },
+    )
+
+    assert_requested request
+  end
+
+  def test_response_headers_use_symbol_keys
+    stub_request(:get, "http://test.com/rest/v1.0/home")
+      .to_return(
+        status: 200,
+        body: "",
+        headers: { "X-Request-Id" => "abc", "Content-Type" => "application/json" },
+      )
+
+    response = Request.new(token: "token").get("home")
+
+    assert_equal "abc", response.headers[:x_request_id]
+    assert_equal "application/json", response.headers[:content_type]
+  end
+
+  def test_response_pagination_from_link_header
+    stub_request(:get, "http://test.com/rest/v1.0/projects")
+      .to_return(
+        status: 200,
+        body: "[]",
+        headers: {
+          "Link" => '<http://test.com/rest/v1.0/projects?page=2>; rel="next", ' \
+            '<http://test.com/rest/v1.0/projects?page=9>; rel="last"',
+        },
+      )
+
+    response = Request.new(token: "token").get("projects")
+
+    assert_equal(
+      { next: "projects?page=2", last: "projects?page=9" },
+      response.pagination,
+    )
+  end
+
+  def test_response_exposes_code_request_and_request_body
+    stub_request(:post, "http://test.com/rest/v1.0/home")
+      .to_return(status: 201, body: { id: 1 }.to_json, headers: {})
+
+    response = Request.new(token: "token").post("home", body: { name: "Name" })
+
+    assert_equal 201, response.code
+    assert_equal({ "id" => 1 }, response.body)
+    assert_equal({ name: "Name" }, response.request_body)
+    assert_equal "http://test.com/rest/v1.0/home", response.request.url
+    assert_equal "post", response.request.method.to_s
+  end
+
+  def test_sync_caps_batch_size_at_1000
+    updates = (1..1001).map { |id| { id: id } }
+    stub_request(:patch, "http://test.com/rest/v1.0/projects/sync")
+      .to_return(status: 200, body: { entities: [], errors: [] }.to_json)
+
+    Request.new(token: "token").sync(
+      "projects/sync",
+      body: { updates: updates },
+      options: { batch_size: 5000 },
+    )
+
+    assert_requested :patch, "http://test.com/rest/v1.0/projects/sync", times: 2
+  end
+
+  def test_invalid_version_raises
+    assert_raises Procore::InvalidRequestError do
+      Request.new(token: "token").get("home", version: "v1")
+    end
+  end
+
+  def test_bad_request_error
+    stub_request(:get, "http://test.com/rest/v1.0/")
+      .to_return(status: 400, body: "", headers: {})
+
+    error = assert_raises Procore::InvalidRequestError do
+      Request.new(token: "token").get("")
+    end
+
+    assert_equal 400, error.response.code
+  end
+
+  def test_unprocessable_entity_error
+    stub_request(:get, "http://test.com/rest/v1.0/")
+      .to_return(status: 422, body: "", headers: {})
+
+    error = assert_raises Procore::InvalidRequestError do
+      Request.new(token: "token").get("")
+    end
+
+    assert_equal 422, error.response.code
+  end
+
+  def test_rate_limit_error
+    stub_request(:get, "http://test.com/rest/v1.0/")
+      .to_return(status: 429, body: "", headers: {})
+
+    error = assert_raises Procore::RateLimitError do
+      Request.new(token: "token").get("")
+    end
+
+    assert_equal 429, error.response.code
+  end
+
+  def test_retries_timeout_with_backoff_then_raises
+    stub_request(:get, "http://test.com/rest/v1.0/retry_test").to_timeout
+    request = Request.new(token: "token")
+
+    sleeps = with_max_retries(2) do
+      record_sleeps(request) do
+        assert_raises(Procore::APIConnectionError) do
+          request.get("retry_test")
+        end
+      end
+    end
+
+    assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 3
+    assert_equal [1.5, 2.25], sleeps
+  end
+
+  def test_retry_succeeds_after_transient_failure
+    stub_request(:get, "http://test.com/rest/v1.0/retry_test")
+      .to_timeout
+      .then
+      .to_return(status: 200, body: { ok: true }.to_json, headers: {})
+
+    request = Request.new(token: "token")
+
+    response = nil
+
+    with_max_retries(1) do
+      record_sleeps(request) do
+        response = request.get("retry_test")
+      end
+    end
+
+    assert_equal({ "ok" => true }, response.body)
+    assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 2
+  end
+
+  def test_retries_connection_refused
+    stub_request(:get, "http://test.com/rest/v1.0/retry_test")
+      .to_raise(Errno::ECONNREFUSED)
+    request = Request.new(token: "token")
+
+    with_max_retries(1) do
+      record_sleeps(request) do
+        assert_raises(Procore::APIConnectionError) do
+          request.get("retry_test")
+        end
+      end
+    end
+
+    assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 2
+  end
+
+  def test_retries_connection_reset
+    stub_request(:get, "http://test.com/rest/v1.0/retry_test")
+      .to_raise(Errno::ECONNRESET)
+    request = Request.new(token: "token")
+
+    with_max_retries(1) do
+      record_sleeps(request) do
+        assert_raises(Procore::APIConnectionError) do
+          request.get("retry_test")
+        end
+      end
+    end
+
+    assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 2
+  end
+
+  def test_post_is_retried
+    stub_request(:post, "http://test.com/rest/v1.0/retry_test").to_timeout
+    request = Request.new(token: "token")
+
+    with_max_retries(1) do
+      record_sleeps(request) do
+        assert_raises(Procore::APIConnectionError) do
+          request.post("retry_test", body: { name: "Name" })
+        end
+      end
+    end
+
+    assert_requested :post, "http://test.com/rest/v1.0/retry_test", times: 2
+  end
+
+  def test_patch_is_retried
+    stub_request(:patch, "http://test.com/rest/v1.0/retry_test").to_timeout
+    request = Request.new(token: "token")
+
+    with_max_retries(1) do
+      record_sleeps(request) do
+        assert_raises(Procore::APIConnectionError) do
+          request.patch("retry_test", body: { name: "Name" })
+        end
+      end
+    end
+
+    assert_requested :patch, "http://test.com/rest/v1.0/retry_test", times: 2
+  end
+
+  def test_server_error_is_not_retried
+    stub_request(:get, "http://test.com/rest/v1.0/retry_test")
+      .to_return(status: 500, body: "", headers: {})
+
+    with_max_retries(2) do
+      assert_raises(Procore::ServerError) do
+        Request.new(token: "token").get("retry_test")
+      end
+    end
+
+    assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 1
+  end
+
+  def test_rate_limit_is_not_retried
+    stub_request(:get, "http://test.com/rest/v1.0/retry_test")
+      .to_return(status: 429, body: "", headers: {})
+
+    with_max_retries(2) do
+      assert_raises(Procore::RateLimitError) do
+        Request.new(token: "token").get("retry_test")
+      end
+    end
+
+    assert_requested :get, "http://test.com/rest/v1.0/retry_test", times: 1
+  end
+
+  def test_access_token_failure_is_retried
+    request = stub_request(:get, "http://test.com/rest/v1.0/home")
+      .to_return(status: 200, body: "", headers: {})
+    client = Request.new(token: "token")
+    token_attempts = 0
+    flaky_token = -> {
+      token_attempts += 1
+      if token_attempts == 1
+        raise Procore::OAuthError.new("Token refresh failed")
+      else
+        "token"
+      end
+    }
+
+    with_max_retries(1) do
+      record_sleeps(client) do
+        client.stub(:access_token, flaky_token) do
+          client.get("home")
+        end
+      end
+    end
+
+    assert_requested request, times: 1
   end
 end

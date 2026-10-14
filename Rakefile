@@ -1,14 +1,13 @@
 require "bundler/gem_tasks"
-require "rake/testtask"
+require "minitest/test_task"
 require "rubocop/rake_task"
 
 RuboCop::RakeTask.new(:rubocop) do |t|
   t.options = ["--display-cop-names"]
 end
 
-Rake::TestTask.new do |t|
-  t.libs << "test"
-  t.test_files = FileList["test/**/*_test.rb"]
+Minitest::TestTask.create do |t|
+  t.test_globs = ["test/**/*_test.rb"]
   t.warning = false
 end
 

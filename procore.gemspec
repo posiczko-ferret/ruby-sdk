@@ -29,6 +29,7 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "dalli"
   spec.add_development_dependency "fakefs"
   spec.add_development_dependency "minitest"
+  spec.add_development_dependency "minitest-mock"
   spec.add_development_dependency "pry"
   spec.add_development_dependency "rake"
   spec.add_development_dependency "redis"
