@@ -1,9 +1,11 @@
-require: 
+plugins:
   - rubocop-rails
   - rubocop-performance
 
 AllCops:
-  TargetRubyVersion: 2.5
+  TargetRubyVersion: 3.3
+  NewCops: disable
+  SuggestExtensions: false
   Include:
     - '**/Rakefile'
     - '**/config.ru'
@@ -112,7 +114,7 @@ Metrics/BlockLength:
   Enabled: false
   CountComments: true  # count full line comments?
   Max: 25
-  ExcludedMethods: []
+  AllowedMethods: []
   Exclude:
     - "**/*.rake"
     - "spec/**/*"
@@ -172,7 +174,7 @@ Style/FrozenStringLiteralComment:
     to help transition from Ruby 2.3.0 to Ruby 3.0.
   Enabled: false
 
-Style/FlipFlop:
+Lint/FlipFlop:
   Description: 'Checks for flip flops'
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#no-flip-flops'
   Enabled: false
@@ -225,7 +227,7 @@ Style/LineEndConcatenation:
                  line end.
   Enabled: false
 
-Metrics/LineLength:
+Layout/LineLength:
   Description: 'Limit lines to 80 characters.'
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#80-character-limits'
   Max: 150
@@ -306,7 +308,7 @@ Style/PerlBackrefs:
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#no-perl-regexp-last-matchers'
   Enabled: false
 
-Naming/PredicateName:
+Naming/PredicatePrefix:
   Description: 'Check the names of predicate methods.'
   StyleGuide: 'https://github.com/bbatsov/ruby-style-guide#bool-methods-qmark'
   ForbiddenPrefixes:
@@ -498,7 +500,7 @@ Lint/CircularArgumentReference:
   Description: "Don't refer to the keyword argument in the default value."
   Enabled: false
 
-Lint/ConditionPosition:
+Layout/ConditionPosition:
   Description: >-
                  Checks for condition placed in a confusing position relative to
                  the keyword.
@@ -606,7 +608,7 @@ Performance/ReverseEach:
   Reference: 'https://github.com/JuanitoFatas/fast-ruby#enumerablereverseeach-vs-enumerablereverse_each-code'
   Enabled: false
 
-Performance/Sample:
+Style/Sample:
   Description: >-
                   Use `sample` instead of `shuffle.first`,
                   `shuffle.last`, and `shuffle[Fixnum]`.
@@ -674,4 +676,8 @@ Rails/TimeZone:
 
 Rails/Validation:
   Description: 'Use validates :attribute, hash of validations.'
+  Enabled: false
+
+# This is a gem, not a Rails app: there is no :environment task to depend on.
+Rails/RakeEnvironment:
   Enabled: false
