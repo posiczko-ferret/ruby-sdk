@@ -230,7 +230,6 @@ module Procore
         "API Request Initiated",
         path: full_path,
         method: "DELETE",
-        headers: headers(options),
         query: query.to_s,
       )
 
@@ -238,7 +237,7 @@ module Procore
         RestClient::Request.execute(
           method: :delete,
           url: full_path,
-          headers: headers.merge(params: query),
+          headers: headers(options).merge(params: query),
           timeout: Procore.configuration.timeout,
         )
       end

@@ -9,8 +9,10 @@ module Procore
       end.join(" ")
 
       Procore.configuration.logger.info(
-        "#{colorize('Procore', :yellow)} <<- " \
-        "#{colorize(message.ljust(22), :cyan)} <<- #{meta_string}",
+        redact(
+          "#{colorize('Procore', :yellow)} <<- " \
+          "#{colorize(message.ljust(22), :cyan)} <<- #{meta_string}",
+        ),
       )
     end
 
@@ -22,10 +24,23 @@ module Procore
       end.join(" ")
 
       Procore.configuration.logger.info(
-        "#{colorize('Procore', :red)} <<- " \
-        "#{colorize(message.ljust(22), :red)} <<- #{meta_string}",
+        redact(
+          "#{colorize('Procore', :red)} <<- " \
+          "#{colorize(message.ljust(22), :red)} <<- #{meta_string}",
+        ),
       )
     end
+
+    # Replaces bearer tokens with "###" so access tokens never reach the logs,
+    # whichever caller passes them in.
+    #
+    # @example
+    #   redact('"Authorization" => "Bearer abc123"')
+    #     #=> '"Authorization" => "Bearer ###"'
+    def self.redact(text)
+      text.gsub(BEARER_TOKEN, '\1###')
+    end
+    private_class_method :redact
 
     def self.colorize(text, color, bold: false)
       mode = bold ? 1 : 0
@@ -35,6 +50,10 @@ module Procore
       "\033[#{mode};#{foreground};#{background}m#{text}\033[0m"
     end
     private_class_method :colorize
+
+    # The token characters allowed by RFC 6750 (b64token).
+    BEARER_TOKEN = %r{(bearer\s+)[A-Za-z0-9\-._~+/]+=*}i
+    private_constant :BEARER_TOKEN
 
     COLOR_CODES = {
       black: 0,

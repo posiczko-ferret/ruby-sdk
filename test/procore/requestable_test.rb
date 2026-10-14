@@ -287,6 +287,37 @@ class Procore::RequestableTest < Minitest::Test
     assert_requested request
   end
 
+  def test_delete_with_company_id
+    request = stub_request(:delete, "http://test.com/rest/v1.0/home")
+      .with(
+        headers: headers.merge("procore-company-id" => "1")
+      )
+      .to_return(status: 200, body: "", headers: {})
+
+    Request.new(token: "token").delete(
+      "home",
+      options: { company_id: 1 },
+    )
+
+    assert_requested request
+  end
+
+  def test_delete_does_not_log_access_token
+    stub_request(:delete, "http://test.com/rest/v1.0/home")
+      .to_return(status: 200, body: "", headers: {})
+    output = StringIO.new
+    logger_old = Procore.configuration.logger
+    Procore.configuration.logger = Logger.new(output)
+
+    begin
+      Request.new(token: "secret-token").delete("home")
+    ensure
+      Procore.configuration.logger = logger_old
+    end
+
+    refute_includes output.string, "secret-token"
+  end
+
   def test_post_with_multipart_body
     request = stub_request(:post, "http://test.com/rest/v1.0/home")
       .with(
@@ -458,6 +489,19 @@ class Procore::RequestableTest < Minitest::Test
     assert_equal({ name: "Name" }, response.request_body)
     assert_equal "http://test.com/rest/v1.0/home", response.request.url
     assert_equal "post", response.request.method.to_s
+  end
+
+  # Response#request keeps the values RestClient::Request gave callers.
+  def test_response_request_matches_rest_client_values
+    stub_request(:get, "http://test.com/rest/v1.0/home")
+      .with(query: { per_page: 5 })
+      .to_return(status: 200, body: "", headers: {})
+
+    request = Request.new(token: "token").get("home", query: { per_page: 5 }).request
+
+    assert_equal "http://test.com/rest/v1.0/home?per_page=5", request.url
+    assert_equal "get", request.method
+    assert_equal "Bearer token", request.headers["Authorization"]
   end
 
   def test_sync_caps_batch_size_at_1000
