@@ -1,11 +1,25 @@
-## Unreleased
+## 2.0.0 (Unreleased)
 
 * **Breaking:** Require Ruby 3.3 or newer. Ruby 3.0, 3.1 and 3.2 are end-of-life.
+
+* **Breaking:** Replace rest-client with Faraday (see `docs/adr/0001-replace-rest-client-with-faraday.md` for the upgrade guide):
+  * `Response#request` is now a `Procore::Request` (`url`, `method`, `headers`, `payload`) instead of a `RestClient::Request`.
+  * TLS certificate errors, DNS failures and unreachable hosts now raise `Procore::APIConnectionError`.
+  * `APIConnectionError#cause` and `Requestable::HTTP_EXCEPTIONS` use Faraday exception classes.
+  * The gem no longer loads rest-client.
+
+* Fix token revoke failures raising `OAuth2::Error` instead of `Procore::OAuthError`.
+
+* Fix request logs never including the response's `X-Request-Id`.
 
 * Support Ruby 3.4 and 4.0:
   * Replace `OpenStruct` (no longer bundled with Ruby 4.0) with `Struct` in `Procore::OAuthError`.
   * Add `pstore` as a runtime dependency (no longer bundled with Ruby 4.0).
   * Fix `Procore::Auth::Stores::File` failing to load saved tokens on Ruby 3.4+ (`Psych::DisallowedClass`).
+
+* Fix `delete` ignoring `options:`, so `company_id` was never sent as the `Procore-Company-Id` header on DELETE requests.
+
+* **Security:** stop logging request headers on DELETE requests. The log line included the `Authorization` header, exposing the access token to anything with access to the logs. All log lines now also replace bearer tokens with `###`.
 
 ## 1.3.1 (Jan 9, 2024)
 
