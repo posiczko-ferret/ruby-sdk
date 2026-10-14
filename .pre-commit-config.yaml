@@ -1,0 +1,20 @@
+# Hooks run by prek (https://github.com/j178/prek), or pre-commit. Install them
+# with `prek install --hook-type pre-commit`.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      # Runs on every commit, not just Gemfile.lock changes, so new advisories
+      # against unchanged gems block the commit too.
+      - id: security-audit
+        name: Security Audit
+        entry: bundle exec rake security:audit
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
