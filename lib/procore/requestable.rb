@@ -472,9 +472,15 @@ module Procore
       value.respond_to?(:path) && value.respond_to?(:read)
     end
 
+    # A path that already names its version, as Response#pagination returns.
+    VERSIONED_PATH = %r{\A/?(?:vapid|rest/v\d+\.\d+)(?:/|\z)}
+    private_constant :VERSIONED_PATH
+
     def full_path(path, version)
       version ||= options[:default_version]
-      if version == "vapid"
+      if VERSIONED_PATH.match?(path)
+        File.join(base_api_path, path)
+      elsif version == "vapid"
         File.join(base_api_path, "vapid", path)
       elsif /\Av\d+\.\d+\z/.match?(version)
         File.join(base_api_path, "rest", version, path)

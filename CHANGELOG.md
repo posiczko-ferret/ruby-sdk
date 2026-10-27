@@ -19,6 +19,8 @@
 
 * Fix the gem failing outside Rails: the Session, Redis and Dalli stores, `sync` and `OAuthError` relied on ActiveSupport core extensions the gem never required. `Procore::Auth::Token` now defines `to_h` and `to_json`, and the gem requires `activesupport` 7.0 or newer.
 
+* **Breaking:** `Response#pagination` paths now include the API version (`"rest/v1.1/projects?page=2"`, `"vapid/projects?page=2"`) instead of stripping it, and `get`/`delete` accept such paths without adding `default_version`. Following a next link from a v1.1, v2.0 or vapid response previously requested the default version.
+
 * Fix empty response bodies (such as 204 No Content) parsing to the String `"{}"` instead of an empty Hash.
 
 * Fix `delete` ignoring `options:`, so `company_id` was never sent as the `Procore-Company-Id` header on DELETE requests.

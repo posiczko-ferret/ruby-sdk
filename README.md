@@ -404,14 +404,17 @@ like:
 response.pagination
 
 {
-  next: "projects?per_page=100&page=2",
-  last: "projects?per_page=100&page=5"
+  next: "rest/v1.0/projects?per_page=100&page=2",
+  last: "rest/v1.0/projects?per_page=100&page=5"
 }
 ```
 
 The `next` value will return the second page of results - which is expected as
 all paginated responses start on page 1. The `last` value ends on page 5, so
 there are another 4 pages to consume in order to get all the possible results.
+
+Each path carries the API version the page was requested with, so passing it
+back to `client#get` requests the same version without a `version:` argument.
 
 ### Navigating Through Paginated Results
 
@@ -428,10 +431,10 @@ end
 puts next_page.pagination
 
 {
-  first: "projects?per_page=100&page=1",
-  next: "projects?per_page=100&page=3",
-  prev: "projects?per_page=100&page=1",
-  last: "projects?per_page=100&page=5"
+  first: "rest/v1.0/projects?per_page=100&page=1",
+  next: "rest/v1.0/projects?per_page=100&page=3",
+  prev: "rest/v1.0/projects?per_page=100&page=1",
+  last: "rest/v1.0/projects?per_page=100&page=5"
 }
 ```
 
@@ -445,8 +448,8 @@ first_page = client.get("projects", query: { per_page: 250 })
 
 puts first_page.pagination
 {
-  next: "projects?per_page=250&page=2",
-  last: "projects?per_page=250&page=2"
+  next: "rest/v1.0/projects?per_page=250&page=2",
+  last: "rest/v1.0/projects?per_page=250&page=2"
 }
 ```
 

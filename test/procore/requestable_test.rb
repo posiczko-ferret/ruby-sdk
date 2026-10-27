@@ -519,9 +519,52 @@ class Procore::RequestableTest < Minitest::Test
     response = Request.new(token: "token").get("projects")
 
     assert_equal(
-      { next: "projects?page=2", last: "projects?page=9" },
+      { next: "rest/v1.0/projects?page=2", last: "rest/v1.0/projects?page=9" },
       response.pagination,
     )
+  end
+
+  def test_following_a_next_link_keeps_the_requested_version
+    stub_request(:get, "http://test.com/rest/v1.1/projects")
+      .to_return(
+        status: 200,
+        body: "[]",
+        headers: { "Link" => '<http://test.com/rest/v1.1/projects?page=2>; rel="next"' },
+      )
+    next_page = stub_request(:get, "http://test.com/rest/v1.1/projects?page=2")
+      .to_return(status: 200, body: "[]", headers: {})
+    client = Request.new(token: "token")
+
+    first_page = client.get("projects", version: "v1.1")
+    client.get(first_page.pagination[:next])
+
+    assert_requested next_page
+  end
+
+  def test_following_a_vapid_next_link_stays_on_vapid
+    stub_request(:get, "http://test.com/vapid/projects")
+      .to_return(
+        status: 200,
+        body: "[]",
+        headers: { "Link" => '<http://test.com/vapid/projects?page=2>; rel="next"' },
+      )
+    next_page = stub_request(:get, "http://test.com/vapid/projects?page=2")
+      .to_return(status: 200, body: "[]", headers: {})
+    client = Request.new(token: "token")
+
+    first_page = client.get("projects", version: "vapid")
+    client.get(first_page.pagination[:next])
+
+    assert_requested next_page
+  end
+
+  def test_versioned_path_is_not_prefixed_again
+    request = stub_request(:delete, "http://test.com/rest/v2.0/companies/1/projects/2")
+      .to_return(status: 204, body: "", headers: {})
+
+    Request.new(token: "token").delete("rest/v2.0/companies/1/projects/2")
+
+    assert_requested request
   end
 
   def test_response_exposes_code_request_and_request_body
