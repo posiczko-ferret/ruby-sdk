@@ -106,6 +106,87 @@ class Procore::ClientTest < Minitest::Test
     assert_requested stub_refresh_token
   end
 
+  def stub_service_account_token(access_token:)
+    stub_request(:post, "https://procore-login.example.com/oauth/token")
+      .with(body: hash_including("grant_type" => "client_credentials"))
+      .to_return(
+        status: 200,
+        body: { access_token: access_token, token_type: "bearer", expires_in: 7200 }.to_json,
+        headers: { "Content-Type" => "application/json" },
+      )
+  end
+
+  def service_account_client(store)
+    Procore::Client.new(
+      client_id: "client id",
+      client_secret: "client secret",
+      store: store,
+      grant_type: :client_credentials,
+    )
+  end
+
+  def test_client_credentials_requests_a_token_when_the_store_is_empty
+    token_request = stub_service_account_token(access_token: "service token")
+    api_request = stub_request(:get, "https://procore.example.com/rest/v1.0/me")
+      .with(headers: { "Authorization" => "Bearer service token" })
+    store = Procore::Auth::Stores::Memory.new(key: 1)
+
+    service_account_client(store).get("me")
+
+    assert_requested token_request
+    assert_requested api_request
+    assert_equal "service token", store.fetch.access_token
+  end
+
+  def test_client_credentials_replaces_an_expired_token
+    stub_service_account_token(access_token: "new token")
+    api_request = stub_request(:get, "https://procore.example.com/rest/v1.0/me")
+      .with(headers: { "Authorization" => "Bearer new token" })
+    store = Procore::Auth::Stores::Memory.new(key: 1)
+    store.save(
+      Procore::Auth::Token.new(
+        access_token: "old token",
+        refresh_token: nil,
+        expires_at: 2.hours.ago.to_i,
+      ),
+    )
+
+    service_account_client(store).get("me")
+
+    assert_requested api_request
+  end
+
+  def test_client_credentials_revokes_the_stored_token
+    revoke_request = stub_request(:post, "https://procore-login.example.com/oauth/revoke")
+      .with(body: hash_including("token" => "service token"))
+      .to_return(status: 200)
+    store = Procore::Auth::Stores::Memory.new(key: 1)
+    store.save(
+      Procore::Auth::Token.new(
+        access_token: "service token",
+        refresh_token: nil,
+        expires_at: 2.hours.from_now.to_i,
+      ),
+    )
+
+    service_account_client(store).revoke
+
+    assert_requested revoke_request
+  end
+
+  def test_unknown_grant_type_raises
+    error = assert_raises(ArgumentError) do
+      Procore::Client.new(
+        client_id: "client id",
+        client_secret: "client secret",
+        store: Procore::Auth::Stores::Memory.new(key: 1),
+        grant_type: :password,
+      )
+    end
+
+    assert_includes error.message, "grant_type"
+  end
+
   def test_client_token_revoke
     stub_revoke_token
 

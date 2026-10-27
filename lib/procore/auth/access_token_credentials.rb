@@ -1,8 +1,11 @@
 require "oauth2"
+require "procore/auth/oauth_client"
 
 module Procore
   module Auth
     class AccessTokenCredentials
+      include OAuthClient
+
       attr_reader :client_id, :client_secret, :host
       def initialize(client_id:, client_secret:, host:)
         @client_id = client_id
@@ -30,28 +33,6 @@ module Procore
             "is a properly formed url",
           )
         end
-      end
-
-      def revoke(token:)
-        request = {
-          client_id: @client_id,
-          client_secret: @client_secret,
-          token: token.access_token,
-        }
-        client.request(:post, "/oauth/revoke", body: request)
-      rescue OAuth2::Error => e
-        raise OAuthError.new(e.description, response: e.response)
-      end
-
-      private
-
-      def client
-        OAuth2::Client.new(
-          client_id,
-          client_secret,
-          site: host,
-          auth_scheme: :request_body,
-        )
       end
     end
   end

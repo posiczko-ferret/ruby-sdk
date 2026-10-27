@@ -297,6 +297,28 @@ Tokens may also be manually revoked, forcing the client to refresh its token on 
 client.revoke
 ```
 
+### Service accounts
+
+An integration that runs without a signed-in user authenticates with the
+[client credentials grant](https://developers.procore.com/documentation/oauth-client-credentials)
+instead. Pass `grant_type: :client_credentials` and the client requests its own
+token whenever the store is empty or the token has expired, so nothing has to be
+put in the store first. A `Memory` store is enough when one process owns the
+token; use a shared store when several processes or servers do.
+
+```ruby
+client = Procore::Client.new(
+  client_id: ENV["PROCORE_CLIENT_ID"],
+  client_secret: ENV["PROCORE_CLIENT_SECRET"],
+  store: Procore::Auth::Stores::Memory.new(key: "service-account"),
+  grant_type: :client_credentials,
+)
+
+client.get("companies")
+```
+
+`client.refresh` and `client.revoke` work the same way as for a user token.
+
 ## Error Handling
 
 The Procore Gem raises errors whenever a request returns a non `2xx` response.
