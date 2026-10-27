@@ -1,4 +1,4 @@
-## 2.0.0 (Unreleased)
+## 2.0.0 (Oct 26, 2026)
 
 * **Breaking:** Require Ruby 3.3 or newer. Ruby 3.0, 3.1 and 3.2 are end-of-life.
 
