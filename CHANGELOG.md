@@ -1,4 +1,6 @@
-## Unreleased
+## 2.0.1 (Oct 26, 2026)
+
+* Add `body:` to `delete` for Procore DELETE endpoints that take a JSON body, such as bulk destroys. Nothing is sent when it is omitted.
 
 * Add `grant_type: :client_credentials` to `Procore::Client.new` for service accounts. The client requests its own token when the store is empty or expired instead of raising `MissingTokenError`, and `revoke` works for both grant types.
 

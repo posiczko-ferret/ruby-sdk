@@ -226,13 +226,20 @@ module Procore
     # @param path [String] URL path
     # @param version [String] API version
     # @param query [Hash] Query options to pass along with the request
+    # @param body [Hash, Array, nil] Body parameters to send with the request.
+    #   Some Procore endpoints, such as bulk destroys, take a JSON body on
+    #   DELETE. Nothing is sent when omitted.
+    # @param options [Hash] Extra request options
     # @option options [String] :company_id
     #
     # @example Usage
     #   client.delete("users/1", query: {}, options: {})
     #
+    # @example Bulk destroy with a body
+    #   client.delete("projects/1/items/bulk_destroy", body: { ids: [1, 2] })
+    #
     # @return [Response]
-    def delete(path, version: nil, query: {}, options: {})
+    def delete(path, version: nil, query: {}, body: nil, options: {})
       full_path = full_path(path, version)
 
       Util.log_info(
@@ -240,10 +247,17 @@ module Procore
         path: full_path,
         method: "DELETE",
         query: query.to_s,
+        body: body.to_s,
       )
 
-      with_response_handling do
-        perform(:delete, full_path, params: query, headers: headers(options))
+      with_response_handling(request_body: body) do
+        perform(
+          :delete,
+          full_path,
+          params: query,
+          body: (payload(body) unless body.nil?),
+          headers: headers(options),
+        )
       end
     end
 

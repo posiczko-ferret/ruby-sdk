@@ -192,8 +192,15 @@ The `Client` class exposes `#get`, `#post`, `#put`, `#patch`, `#sync` and
   post(path, version: "", body: {}, options: {})
    put(path, version: "", body: {}, options: {})
  patch(path, version: "", body: {}, options: {})
-delete(path, version: "", query: {}, options: {})
+delete(path, version: "", query: {}, body: nil, options: {})
   sync(path, version: "", body: {}, options: {})
+```
+
+`delete` sends a JSON body only when `body:` is given, for the endpoints that
+take one (bulk destroys, for example):
+
+```ruby
+client.delete("projects/1/items/bulk_destroy", body: { ids: [1, 2] }, options: { company_id: 1 })
 ```
 
 #### The `path` and `version`

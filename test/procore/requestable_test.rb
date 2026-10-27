@@ -453,6 +453,42 @@ class Procore::RequestableTest < Minitest::Test
     assert_requested request
   end
 
+  def test_delete_with_body
+    request = stub_request(:delete, "http://test.com/rest/v1.0/home")
+      .with(body: { ids: [1, 2] }, headers: headers)
+      .to_return(status: 200, body: "", headers: {})
+
+    response = Request.new(token: "token").delete("home", body: { ids: [1, 2] })
+
+    assert_requested request
+    assert_equal({ ids: [1, 2] }, response.request_body)
+  end
+
+  def test_delete_with_body_and_query
+    request = stub_request(:delete, "http://test.com/rest/v1.0/home")
+      .with(query: { force: true }, body: { ids: [1] }, headers: headers)
+      .to_return(status: 200, body: "", headers: {})
+
+    Request.new(token: "token").delete(
+      "home",
+      query: { force: true },
+      body: { ids: [1] },
+    )
+
+    assert_requested request
+  end
+
+  def test_delete_without_body_sends_no_body
+    request = stub_request(:delete, "http://test.com/rest/v1.0/home")
+      .with { |req| req.body.blank? }
+      .to_return(status: 200, body: "", headers: {})
+
+    response = Request.new(token: "token").delete("home")
+
+    assert_requested request
+    assert_nil response.request_body
+  end
+
   def test_post_multipart_sends_file_and_fields
     request = stub_request(:post, "http://test.com/rest/v1.0/home")
       .with { |req|
