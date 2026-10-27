@@ -43,7 +43,7 @@ class Procore::RequestableTest < Minitest::Test
 
   def headers
     {
-      "Accepts" => "application/json",
+      "Accept" => "application/json",
       "Authorization" => "Bearer token",
       "Content-Type" => "application/json",
       "Procore-Sdk-Version" => Procore::VERSION,
@@ -60,6 +60,16 @@ class Procore::RequestableTest < Minitest::Test
       .to_return(status: 200, body: "", headers: {})
 
     Request.new(token: "token").get("home", query: { per_page: 5 })
+
+    assert_requested request
+  end
+
+  def test_get_does_not_send_a_misspelled_accept_header
+    request = stub_request(:get, "http://test.com/rest/v1.0/home")
+      .with { |req| !req.headers.key?("Accepts") }
+      .to_return(status: 200, body: "", headers: {})
+
+    Request.new(token: "token").get("home")
 
     assert_requested request
   end

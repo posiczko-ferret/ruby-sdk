@@ -21,6 +21,8 @@
 
 * **Breaking:** `Response#pagination` paths now include the API version (`"rest/v1.1/projects?page=2"`, `"vapid/projects?page=2"`) instead of stripping it, and `get`/`delete` accept such paths without adding `default_version`. Following a next link from a v1.1, v2.0 or vapid response previously requested the default version.
 
+* Fix the `Accept` header being sent as `Accepts`.
+
 * Fix empty response bodies (such as 204 No Content) parsing to the String `"{}"` instead of an empty Hash.
 
 * Fix `delete` ignoring `options:`, so `company_id` was never sent as the `Procore-Company-Id` header on DELETE requests.

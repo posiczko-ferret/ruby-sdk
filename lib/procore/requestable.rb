@@ -334,7 +334,7 @@ module Procore
 
     def headers(options = {})
       {
-        "Accepts" => "application/json",
+        "Accept" => "application/json",
         "Authorization" => "Bearer #{access_token}",
         "Content-Type" => "application/json",
         "Procore-Sdk-Version" => Procore::VERSION,
