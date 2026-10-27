@@ -1,3 +1,7 @@
+## 2.1.1 (Oct 26, 2026)
+
+* Bump the version to 2.1.1. 2.0.1 added features and should have been a minor release. The `v2.1.0` tag was never matched by a version bump, so this release replaces it. No code changes.
+
 ## 2.0.1 (Oct 26, 2026)
 
 * Add `body:` to `delete` for Procore DELETE endpoints that take a JSON body, such as bulk destroys. Nothing is sent when it is omitted.
