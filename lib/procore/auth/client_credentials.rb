@@ -1,8 +1,11 @@
 require "oauth2"
+require "procore/auth/oauth_client"
 
 module Procore
   module Auth
     class ClientCredentials
+      include OAuthClient
+
       attr_reader :client_id, :client_secret, :host
       def initialize(client_id:, client_secret:, host:)
         unless client_id && client_secret
@@ -35,17 +38,6 @@ module Procore
             "is a properly formed url",
           )
         end
-      end
-
-      private
-
-      def client
-        OAuth2::Client.new(
-          client_id,
-          client_secret,
-          site: host,
-          auth_scheme: :request_body,
-        )
       end
     end
   end

@@ -23,6 +23,29 @@ class Procore::Auth::ClientCredentialsTest < Minitest::Test
     assert_equal "token", token.access_token
   end
 
+  def test_revoke
+    revoke_request = stub_request(:post, "https://procore.example.com/oauth/revoke")
+      .with(body: {
+              "client_id" => "id",
+              "client_secret" => "secret",
+              "token" => "token",
+            })
+      .to_return(status: 200)
+    token = Procore::Auth::Token.new(
+      access_token: "token",
+      refresh_token: nil,
+      expires_at: nil,
+    )
+
+    Procore::Auth::ClientCredentials.new(
+      client_id: "id",
+      client_secret: "secret",
+      host: "https://procore.example.com",
+    ).revoke(token: token)
+
+    assert_requested revoke_request
+  end
+
   def test_oauth_client_error_with_html
     stub_request(:post, "https://procore.example.com/oauth/token")
       .with(body: {

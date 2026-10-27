@@ -1,3 +1,7 @@
+## Unreleased
+
+* Add `grant_type: :client_credentials` to `Procore::Client.new` for service accounts. The client requests its own token when the store is empty or expired instead of raising `MissingTokenError`, and `revoke` works for both grant types.
+
 ## 2.0.0 (Oct 26, 2026)
 
 * **Breaking:** Require Ruby 3.3 or newer. Ruby 3.0, 3.1 and 3.2 are end-of-life.
