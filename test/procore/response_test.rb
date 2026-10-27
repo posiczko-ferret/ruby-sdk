@@ -13,6 +13,30 @@ class Procore::Response::BodyTest < Minitest::Test
     assert_equal({ "key" => "value" }, response.body)
   end
 
+  def test_empty_body_parses_to_an_empty_hash
+    response = Procore::Response.new(
+      body: "",
+      code: 204,
+      headers: {},
+      request: nil,
+      request_body: nil,
+    )
+
+    assert_equal({}, response.body)
+  end
+
+  def test_nil_body_parses_to_an_empty_hash
+    response = Procore::Response.new(
+      body: nil,
+      code: 204,
+      headers: {},
+      request: nil,
+      request_body: nil,
+    )
+
+    assert_equal({}, response.body)
+  end
+
   def test_response_body_as_collection
     response_body = [{ "key" => "value" }]
 

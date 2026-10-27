@@ -53,7 +53,7 @@ module Procore
       @pagination = parse_pagination
       @request = request
       @request_body = request_body
-      @raw_body = !body.to_s.empty? ? body : "{}".to_json
+      @raw_body = body.to_s.empty? ? "{}" : body
     end
 
     # @return [Array<Hash>, Hash] Ruby representation of JSON response. Hashes are

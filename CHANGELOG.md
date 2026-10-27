@@ -19,6 +19,8 @@
 
 * Fix the gem failing outside Rails: the Session, Redis and Dalli stores, `sync` and `OAuthError` relied on ActiveSupport core extensions the gem never required. `Procore::Auth::Token` now defines `to_h` and `to_json`, and the gem requires `activesupport` 7.0 or newer.
 
+* Fix empty response bodies (such as 204 No Content) parsing to the String `"{}"` instead of an empty Hash.
+
 * Fix `delete` ignoring `options:`, so `company_id` was never sent as the `Procore-Company-Id` header on DELETE requests.
 
 * **Security:** stop logging request headers on DELETE requests. The log line included the `Authorization` header, exposing the access token to anything with access to the logs. All log lines now also replace bearer tokens with `###`.
