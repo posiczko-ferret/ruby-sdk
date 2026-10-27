@@ -1,14 +1,24 @@
+require "bundler/audit/task"
 require "bundler/gem_tasks"
-require "rake/testtask"
+require "minitest/test_task"
 require "rubocop/rake_task"
 
 RuboCop::RakeTask.new(:rubocop) do |t|
   t.options = ["--display-cop-names"]
 end
 
-Rake::TestTask.new do |t|
-  t.libs << "test"
-  t.test_files = FileList["test/**/*_test.rb"]
+Bundler::Audit::Task.new
+
+namespace :security do
+  desc "Update the vulnerability database and audit Gemfile.lock"
+  task :audit do
+    Rake::Task["bundle:audit:update"].invoke
+    Rake::Task["bundle:audit"].invoke
+  end
+end
+
+Minitest::TestTask.create do |t|
+  t.test_globs = ["test/**/*_test.rb"]
   t.warning = false
 end
 

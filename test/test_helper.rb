@@ -9,16 +9,18 @@ if ENV["COVERAGE"]
   ])
 
   SimpleCov.start do
-    track_files "lib/**/*.{rb}"
-    add_filter "test/"
+    cover "lib/**/*.{rb}"
+    skip "test/"
   end
 end
 
 require "minitest/autorun"
+require "minitest/mock"
 require "webmock/minitest"
 
 require "support/auth_stubs"
 require "support/database"
+require "support/retry_sleeps"
 
 require "procore"
 

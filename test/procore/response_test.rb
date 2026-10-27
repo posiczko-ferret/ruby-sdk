@@ -13,6 +13,30 @@ class Procore::Response::BodyTest < Minitest::Test
     assert_equal({ "key" => "value" }, response.body)
   end
 
+  def test_empty_body_parses_to_an_empty_hash
+    response = Procore::Response.new(
+      body: "",
+      code: 204,
+      headers: {},
+      request: nil,
+      request_body: nil,
+    )
+
+    assert_equal({}, response.body)
+  end
+
+  def test_nil_body_parses_to_an_empty_hash
+    response = Procore::Response.new(
+      body: nil,
+      code: 204,
+      headers: {},
+      request: nil,
+      request_body: nil,
+    )
+
+    assert_equal({}, response.body)
+  end
+
   def test_response_body_as_collection
     response_body = [{ "key" => "value" }]
 
@@ -27,7 +51,7 @@ class Procore::Response::BodyTest < Minitest::Test
     assert_equal(response_body, response.body)
   end
 
-  def shared_response_pagination_parsing_test(base_path)
+  def shared_response_pagination_parsing_test(base_path, version_path)
     links = %W(
       <#{base_path}/projects?page=1>; rel="first",
       <#{base_path}/projects?page=173>; rel="last",
@@ -45,24 +69,28 @@ class Procore::Response::BodyTest < Minitest::Test
 
     assert_equal(
       {
-        first: "projects?page=1",
-        last: "projects?page=173",
-        next: "projects?page=6",
-        prev: "projects?page=4",
+        first: "#{version_path}/projects?page=1",
+        last: "#{version_path}/projects?page=173",
+        next: "#{version_path}/projects?page=6",
+        prev: "#{version_path}/projects?page=4",
       },
       response.pagination,
     )
   end
 
   def test_rest_response_pagination_parsing
-    shared_response_pagination_parsing_test("http://localhost:3000/rest/v1.0")
+    shared_response_pagination_parsing_test("http://localhost:3000/rest/v1.0", "rest/v1.0")
+  end
+
+  def test_rest_v2_response_pagination_parsing
+    shared_response_pagination_parsing_test("http://localhost:3000/rest/v2.0", "rest/v2.0")
   end
 
   def test_vapid_response_pagination_parsing
-      shared_response_pagination_parsing_test("http://localhost:3000/vapid")
+    shared_response_pagination_parsing_test("http://localhost:3000/vapid", "vapid")
   end
 
-  def shared_response_pagination_parsing_on_first_page(base_path)
+  def shared_response_pagination_parsing_on_first_page(base_path, version_path)
     links = %W(
       <#{base_path}/projects?page=173>; rel="last",
       <#{base_path}/projects?page=6>; rel="next"
@@ -78,19 +106,19 @@ class Procore::Response::BodyTest < Minitest::Test
 
     assert_equal(
       {
-        last: "projects?page=173",
-        next: "projects?page=6",
+        last: "#{version_path}/projects?page=173",
+        next: "#{version_path}/projects?page=6",
       },
       response.pagination,
     )
   end
 
   def test_vapid_response_pagination_parsing_on_first_page
-    shared_response_pagination_parsing_on_first_page("http://localhost:3000/vapid")
+    shared_response_pagination_parsing_on_first_page("http://localhost:3000/vapid", "vapid")
   end
 
   def test_rest_response_pagination_parsing_on_first_page
-    shared_response_pagination_parsing_on_first_page("http://localhost:3000/rest/v1.0")
+    shared_response_pagination_parsing_on_first_page("http://localhost:3000/rest/v1.0", "rest/v1.0")
   end
 
   def test_response_pagination_no_links

@@ -15,7 +15,8 @@ Once a GitHub issue is accepted and assigned to you, please follow general workf
 
 - `bundle install` to install the dependencies
 - Make sure tests pass locally
-  - You'll need to spin up a few containers (redis and memcached) to run the tests. You can do this by running `docker-compose up -d` in the root of the project.
+  - You'll need to spin up a few containers (redis and memcached) to run the tests. You can do this by running 
+    `docker compose up -d` in the root of the project.
   - Run tests with `COVERAGE=true bundle exec rake`
 
 3. Commit your changes in the branch you created in step 2. All commits need to be signed-off. Check the [legal](#legal) section bellow for more details.

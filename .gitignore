@@ -10,3 +10,5 @@
 /spec/reports/
 /tmp/
 /dump.rdb
+/vendor/bundle/
+

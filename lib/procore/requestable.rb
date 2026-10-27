@@ -1,5 +1,10 @@
-require "rest-client"
+require "active_support/core_ext/hash/deep_merge"
+require "faraday"
+require "faraday/multipart"
+require "faraday/retry"
+require "mime/types"
 require "procore/errors"
+require "procore/request"
 
 module Procore
   # Module which defines HTTP verbs GET, POST, PUT, PATCH and DELETE. Is
@@ -11,13 +16,41 @@ module Procore
   # @example Using #post:
   #   client.post("projects", name: "New Project")
   module Requestable
+    # Failures raised as APIConnectionError once retries are used up.
     HTTP_EXCEPTIONS = [
+      Faraday::ConnectionFailed,
+      Faraday::SSLError,
+      Faraday::TimeoutError,
+      Procore::OAuthError,
+    ].freeze
+
+    # Connection failures worth retrying: the connection timed out, or the
+    # server refused, reset or closed it. DNS, unreachable-host and TLS
+    # failures are not retried. faraday-net_http raises connect timeouts
+    # (Net::OpenTimeout) as ConnectionFailed, hence Timeout::Error here.
+    RETRIABLE_CONNECTION_ERRORS = [
       Errno::ECONNREFUSED,
       Errno::ECONNRESET,
-      Procore::OAuthError,
-      RestClient::Exceptions::Timeout,
-      RestClient::ServerBrokeConnection,
+      EOFError,
+      Timeout::Error,
     ].freeze
+
+    RETRY_IF = lambda do |_env, exception|
+      if exception.is_a?(Faraday::ConnectionFailed)
+        RETRIABLE_CONNECTION_ERRORS.any? do |error|
+          exception.wrapped_exception.is_a?(error)
+        end
+      else
+        true
+      end
+    end
+    private_constant :RETRIABLE_CONNECTION_ERRORS, :RETRY_IF
+
+    # GET follows redirects, as it did with rest-client.
+    REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
+    MAX_REDIRECTS = 10
+    private_constant :REDIRECT_STATUSES, :MAX_REDIRECTS
+
     # @param path [String] URL path
     # @param version [String] API version
     # @param query [Hash] Query options to pass along with the request
@@ -38,12 +71,7 @@ module Procore
       )
 
       with_response_handling do
-        RestClient::Request.execute(
-          method: :get,
-          url: full_path,
-          headers: headers(options).merge(params: query),
-          timeout: Procore.configuration.timeout,
-        )
+        get_following_redirects(full_path, query, headers(options))
       end
     end
 
@@ -72,13 +100,7 @@ module Procore
       )
 
       with_response_handling(request_body: body) do
-        RestClient::Request.execute(
-          method: :post,
-          url: full_path,
-          payload: payload(body),
-          headers: headers(options),
-          timeout: Procore.configuration.timeout,
-        )
+        perform(:post, full_path, body: payload(body), headers: headers(options))
       end
     end
 
@@ -103,13 +125,7 @@ module Procore
       )
 
       with_response_handling(request_body: body) do
-        RestClient::Request.execute(
-          method: :put,
-          url: full_path,
-          payload: payload(body),
-          headers: headers(options),
-          timeout: Procore.configuration.timeout,
-        )
+        perform(:put, full_path, body: payload(body), headers: headers(options))
       end
     end
 
@@ -138,13 +154,7 @@ module Procore
       )
 
       with_response_handling(request_body: body) do
-        RestClient::Request.execute(
-          method: :patch,
-          url: full_path,
-          payload: payload(body),
-          headers: headers(options),
-          timeout: Procore.configuration.timeout,
-        )
+        perform(:patch, full_path, body: payload(body), headers: headers(options))
       end
     end
 
@@ -193,12 +203,11 @@ module Procore
       responses = groups.map do |group|
         batched_body = body.merge(updates: group)
         with_response_handling(request_body: batched_body) do
-          RestClient::Request.execute(
-            method: :patch,
-            url: full_path,
-            payload: payload(batched_body),
+          perform(
+            :patch,
+            full_path,
+            body: payload(batched_body),
             headers: headers(options),
-            timeout: Procore.configuration.timeout,
           )
         end
       end
@@ -230,17 +239,11 @@ module Procore
         "API Request Initiated",
         path: full_path,
         method: "DELETE",
-        headers: headers(options),
         query: query.to_s,
       )
 
       with_response_handling do
-        RestClient::Request.execute(
-          method: :delete,
-          url: full_path,
-          headers: headers.merge(params: query),
-          timeout: Procore.configuration.timeout,
-        )
+        perform(:delete, full_path, params: query, headers: headers(options))
       end
     end
 
@@ -252,52 +255,43 @@ module Procore
 
       begin
         result = yield
-      rescue *HTTP_EXCEPTIONS => e
+      rescue Procore::OAuthError
+        # The access token is fetched before Faraday sends the request, so the
+        # retry middleware never sees this failure. Retry it here instead.
         if retries < Procore.configuration.max_retries
           retries += 1
           sleep 1.5**retries
           retry
         else
-          raise APIConnectionError.new(
-            "Cannot connect to the Procore API. Double check your timeout "    \
-            "settings to ensure requests are not being cancelled before they " \
-            "can complete. Try setting the timeout and max_retries to larger " \
-            "values.",
-          ), e
+          raise_connection_error
         end
-      rescue RestClient::ExceptionWithResponse => e
-        result = e.response
+      rescue *HTTP_EXCEPTIONS
+        raise_connection_error
       end
 
-      response = Procore::Response.new(
-        body: result.body,
-        headers: result.headers,
-        code: result.code,
-        request: result.request,
-        request_body: request_body,
-      )
+      response = build_response(result, request_body)
 
-      case result.code
+      case response.code
       when 200..299
         Util.log_info(
           "API Request Finished ",
-          path: result.request.url,
-          status: result.code.to_s,
+          path: response.request.url,
+          status: response.code.to_s,
           duration: "#{((Time.now - request_start_time) * 1000).round(0)}ms",
-          request_id: result.headers["x-request-id"],
+          request_id: response.headers[:x_request_id],
         )
       else
         Util.log_error(
           "API Request Failed",
-          path: result.request.url,
-          status: result.code.to_s,
+          path: response.request.url,
+          status: response.code.to_s,
           duration: "#{((Time.now - request_start_time) * 1000).round(0)}ms",
-          request_id: result.headers["x-request-id"],
+          request_id: response.headers[:x_request_id],
           retries: retries,
         )
       end
 
-      case result.code
+      case response.code
       when 200..299
         response
       when 401
@@ -340,7 +334,7 @@ module Procore
 
     def headers(options = {})
       {
-        "Accepts" => "application/json",
+        "Accept" => "application/json",
         "Authorization" => "Bearer #{access_token}",
         "Content-Type" => "application/json",
         "Procore-Sdk-Version" => Procore::VERSION,
@@ -348,30 +342,145 @@ module Procore
         "User-Agent" => Procore.configuration.user_agent,
       }.tap do |headers|
         if options[:idempotency_token]
-          headers["Idempotency-Token"] = options[:idempotency_token]
+          headers["Idempotency-Token"] = options[:idempotency_token].to_s
         end
 
         if options[:company_id]
-          headers["procore-company-id"] = options[:company_id]
+          headers["procore-company-id"] = options[:company_id].to_s
         end
+      end
+    end
+
+    # Raised from inside a rescue, so the original error becomes the cause.
+    def raise_connection_error
+      raise APIConnectionError.new(
+        "Cannot connect to the Procore API. Double check your timeout "    \
+        "settings to ensure requests are not being cancelled before they " \
+        "can complete. Try setting the timeout and max_retries to larger " \
+        "values.",
+      )
+    end
+
+    def connection
+      Faraday.new do |conn|
+        conn.options.timeout = Procore.configuration.timeout
+        # Retry runs before multipart so each attempt re-encodes the upload.
+        conn.request :retry,
+          max: Procore.configuration.max_retries,
+          interval: 1.5,
+          backoff_factor: 1.5,
+          exceptions: [Faraday::TimeoutError, Faraday::ConnectionFailed],
+          methods: [],
+          retry_if: RETRY_IF
+        conn.request :multipart
+        conn.adapter Faraday.default_adapter
+      end
+    end
+
+    def perform(method, url, headers:, params: nil, body: nil)
+      # Multipart bodies arrive as a Hash; let the middleware set the
+      # multipart Content-Type and boundary.
+      if body.is_a?(Hash)
+        headers = headers.except("Content-Type")
+      end
+
+      connection.run_request(method, url, body, headers) do |request|
+        request.params.update(params) if params
+      end
+    end
+
+    def get_following_redirects(url, query, headers)
+      response = perform(:get, url, params: query, headers: headers)
+      MAX_REDIRECTS.times do
+        location = response.headers["location"]
+        break unless REDIRECT_STATUSES.include?(response.status) && location
+
+        response = perform(
+          :get,
+          URI.join(response.env.url.to_s, location).to_s,
+          headers: headers,
+        )
+      end
+      response
+    end
+
+    def build_response(result, request_body)
+      env = result.env
+
+      Procore::Response.new(
+        body: result.body,
+        headers: response_headers(result.headers),
+        code: result.status,
+        request: Procore::Request.new(
+          method: env.method.to_s,
+          url: env.url.to_s,
+          headers: env.request_headers.to_h,
+          payload: (env.request_body if env.request_body.is_a?(String)),
+        ),
+        request_body: request_body,
+      )
+    end
+
+    # Keys headers the way rest-client did (:x_request_id, :content_type),
+    # which callers and Response#pagination rely on.
+    def response_headers(headers)
+      headers.to_h.to_h do |name, value|
+        [name.to_s.downcase.tr("-", "_").to_sym, value]
       end
     end
 
     def payload(body)
       if multipart?(body)
-        body
+        multipart_body(body)
       else
         body.to_json
       end
     end
 
     def multipart?(body)
-      RestClient::Payload::has_file?(body)
+      case body
+      when Hash then body.values.any? { |value| multipart?(value) }
+      when Array then body.any? { |value| multipart?(value) }
+      else file?(body)
+      end
     end
+
+    def multipart_body(body)
+      case body
+      when Hash then body.transform_values { |value| multipart_body(value) }
+      when Array then body.map { |value| multipart_body(value) }
+      else
+        if file?(body)
+          Faraday::Multipart::FilePart.new(
+            body,
+            content_type(body.path),
+            File.basename(body.path),
+          )
+        else
+          body
+        end
+      end
+    end
+
+    # Guesses from the file extension, as rest-client did.
+    def content_type(path)
+      MIME::Types.type_for(path).first&.content_type ||
+        "application/octet-stream"
+    end
+
+    def file?(value)
+      value.respond_to?(:path) && value.respond_to?(:read)
+    end
+
+    # A path that already names its version, as Response#pagination returns.
+    VERSIONED_PATH = %r{\A/?(?:vapid|rest/v\d+\.\d+)(?:/|\z)}
+    private_constant :VERSIONED_PATH
 
     def full_path(path, version)
       version ||= options[:default_version]
-      if version == "vapid"
+      if VERSIONED_PATH.match?(path)
+        File.join(base_api_path, path)
+      elsif version == "vapid"
         File.join(base_api_path, "vapid", path)
       elsif /\Av\d+\.\d+\z/.match?(version)
         File.join(base_api_path, "rest", version, path)

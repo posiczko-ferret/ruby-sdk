@@ -6,6 +6,7 @@
 
 #### Table of Contents
 - [Installation](#installation)
+- [Upgrading to 2.0](#upgrading-to-20)
 - [Configuration](#configuration)
 - [Making Requests](#making-requests)
 - [Usage](#usage)
@@ -15,12 +16,14 @@
   - [Change Number of Results](#change-number-of-results)
 - [Sync Actions](#sync-actions)
 - [Stores](#stores)
+  - [Choosing a Store](#choosing-a-store)
   - [Session Store](#session-store)
   - [Redis Store](#redis-store)
   - [Dalli Store](#dalli-store)
   - [ActiveRecord Store](#activerecord-store)
   - [File Store](#file-store)
   - [Memory Store](#memory-store)
+  - [Custom Stores](#custom-stores)
 - [Full Example](#full-example)
 - [Contributing](#contributing)
 
@@ -31,6 +34,88 @@ Add this line to your application's Gemfile:
 ```ruby
 gem "procore"
 ```
+
+The gem requires Ruby 3.3 or newer.
+
+## Upgrading to 2.0
+
+Version 2.0 requires Ruby 3.3 or newer, and sends requests with
+[Faraday](https://lostisland.github.io/faraday/) instead of rest-client. The
+request methods (`get`, `post`, `put`, `patch`, `delete`, `sync`), their
+arguments, `Procore::Response` and the configuration options are unchanged.
+What changes is mostly which exceptions you see. The reasoning is recorded in
+[docs/adr/0001-replace-rest-client-with-faraday.md](docs/adr/0001-replace-rest-client-with-faraday.md).
+
+### Exceptions
+
+Every failure now raises a `Procore::Error` subclass, so
+`rescue Procore::Error` catches anything the client raises for a failed request.
+
+| Failure                           | 1.x raises                              | 2.0 raises               | `cause` in 1.x                        | `cause` in 2.0              |
+|-----------------------------------|-----------------------------------------|--------------------------|---------------------------------------|-----------------------------|
+| HTTP 401                          | `AuthorizationError`                    | unchanged                | –                                     | –                           |
+| HTTP 403                          | `ForbiddenError`                        | unchanged                | –                                     | –                           |
+| HTTP 404                          | `NotFoundError`                         | unchanged                | –                                     | –                           |
+| HTTP 400, 422                     | `InvalidRequestError`                   | unchanged                | –                                     | –                           |
+| HTTP 429                          | `RateLimitError`                        | unchanged                | –                                     | –                           |
+| Any other non-2xx status          | `ServerError`                           | unchanged                | –                                     | –                           |
+| Connect timeout                   | `APIConnectionError`                    | unchanged                | `RestClient::Exceptions::OpenTimeout` | `Faraday::ConnectionFailed` |
+| Read timeout                      | `APIConnectionError`                    | unchanged                | `RestClient::Exceptions::ReadTimeout` | `Faraday::TimeoutError`     |
+| Connection refused                | `APIConnectionError`                    | unchanged                | `Errno::ECONNREFUSED`                 | `Faraday::ConnectionFailed` |
+| Connection reset                  | `APIConnectionError`                    | unchanged                | `Errno::ECONNRESET`                   | `Faraday::ConnectionFailed` |
+| Server closed the connection      | `APIConnectionError`                    | unchanged                | `RestClient::ServerBrokeConnection`   | `Faraday::ConnectionFailed` |
+| Access token could not be fetched | `APIConnectionError`                    | unchanged                | `Procore::OAuthError`                 | unchanged                   |
+| TLS certificate error             | `RestClient::SSLCertificateNotVerified` | **`APIConnectionError`** | –                                     | `Faraday::SSLError`         |
+| DNS lookup failed                 | `SocketError`                           | **`APIConnectionError`** | –                                     | `Faraday::ConnectionFailed` |
+| Host unreachable                  | `Errno::EHOSTUNREACH`                   | **`APIConnectionError`** | –                                     | `Faraday::ConnectionFailed` |
+
+Retries work as before: timeouts, refused and reset connections, and token
+fetch failures are retried `max_retries` times with backoff before
+`APIConnectionError` is raised. HTTP error statuses, including 429 and 5xx, are
+not retried. Every request method is retried, including `post` and `patch`.
+
+To upgrade:
+
+- **If you rescue rest-client or socket errors,** rescue
+  `Procore::APIConnectionError` instead.
+
+  ```ruby
+  # 1.x
+  rescue RestClient::SSLCertificateNotVerified, SocketError, Errno::EHOSTUNREACH => e
+
+  # 2.0
+  rescue Procore::APIConnectionError => e
+  ```
+
+- **If you inspect `cause`,** check for the Faraday class from the table.
+  Faraday keeps the underlying error, so the original `Errno` or `SocketError`
+  is still reachable as `e.cause.wrapped_exception`.
+
+  ```ruby
+  # 1.x
+  retry_later if e.cause.is_a?(Errno::ECONNREFUSED)
+
+  # 2.0
+  retry_later if e.cause.wrapped_exception.is_a?(Errno::ECONNREFUSED)
+  ```
+
+- **If you read `Procore::Requestable::HTTP_EXCEPTIONS`,** it now lists Faraday
+  exception classes instead of `RestClient::Exceptions::Timeout` and
+  `RestClient::ServerBrokeConnection`.
+
+### Other changes
+
+- **`Response#request` is no longer a `RestClient::Request`.** It is a
+  `Procore::Request`. `url`, `method` (a lowercase string such as `"get"`) and
+  `headers` return the same values as before. `payload` now returns the request
+  body as a string; in 1.x, reading it raised `IOError`.
+- **The gem no longer loads rest-client.** If your application uses
+  `RestClient` directly but only got it through this gem, add it to your
+  Gemfile:
+
+  ```ruby
+  gem "rest-client"
+  ```
 
 ## Configuration
 
@@ -115,11 +200,11 @@ delete(path, version: "", query: {}, options: {})
 
 All paths are relative, the gem will handle expanding them. An API version can be specified in the `version:` argument, otherwise the `default_version` in the configuration will be used. 
 
-| Example | Requested URL |
-| --- | --- |
-| `client.get("me")` | `https://api.procore.com/rest/v1.0/me` |
-| `client.get("me", version: "v1.1")` | `https://api.procore.com/rest/v1.1/me` |
-| `client.get("me", version: "vapid")` | `https://api.procore.com/vapid/me` |
+| Example                              | Requested URL                          |
+|--------------------------------------|----------------------------------------|
+| `client.get("me")`                   | `https://api.procore.com/rest/v1.0/me` |
+| `client.get("me", version: "v1.1")`  | `https://api.procore.com/rest/v1.1/me` |
+| `client.get("me", version: "vapid")` | `https://api.procore.com/vapid/me`     |
 
 #### Requiring `company_id` in the `options`
 
@@ -267,7 +352,7 @@ errors generated by this gem.
 ```ruby
 begin
   client.get("projects")
-rescue Procore:Error => e
+rescue Procore::Error => e
   # Something went wrong.
 
   # Print the error class
@@ -279,8 +364,8 @@ rescue Procore:Error => e
   # Print the HTTP code
   puts e.response.code
 
-  # Print the json error response
-  puts e.response.errors
+  # Print the parsed error response body
+  puts e.response.body
 
   # Print the headers
   puts e.response.headers
@@ -319,14 +404,17 @@ like:
 response.pagination
 
 {
-  next: "projects?per_page=100&page=2",
-  last: "projects?per_page=100&page=5"
+  next: "rest/v1.0/projects?per_page=100&page=2",
+  last: "rest/v1.0/projects?per_page=100&page=5"
 }
 ```
 
 The `next` value will return the second page of results - which is expected as
 all paginated responses start on page 1. The `last` value ends on page 5, so
 there are another 4 pages to consume in order to get all the possible results.
+
+Each path carries the API version the page was requested with, so passing it
+back to `client#get` requests the same version without a `version:` argument.
 
 ### Navigating Through Paginated Results
 
@@ -343,10 +431,10 @@ end
 puts next_page.pagination
 
 {
-  first: "projects?per_page=100&page=1",
-  next: "projects?per_page=100&page=3",
-  prev: "projects?per_page=100&page=1",
-  last: "projects?per_page=100&page=5"
+  first: "rest/v1.0/projects?per_page=100&page=1",
+  next: "rest/v1.0/projects?per_page=100&page=3",
+  prev: "rest/v1.0/projects?per_page=100&page=1",
+  last: "rest/v1.0/projects?per_page=100&page=5"
 }
 ```
 
@@ -360,8 +448,8 @@ first_page = client.get("projects", query: { per_page: 250 })
 
 puts first_page.pagination
 {
-  next: "projects?per_page=250&page=2",
-  last: "projects?per_page=250&page=2"
+  next: "rest/v1.0/projects?per_page=250&page=2",
+  last: "rest/v1.0/projects?per_page=250&page=2"
 }
 ```
 
@@ -417,6 +505,58 @@ Stores contain logic for accessing, storing, and managing access tokens. The
 Procore API uses expiring tokens - this gem abstracts away the need to manually
 refresh tokens.
 
+How the client uses its store:
+
+- Before every request, the client reads the token from the store.
+- When the access token has expired, the client refreshes it with the refresh
+  token and saves the new access and refresh tokens back to the store.
+- If the store has no token, the request raises `Procore::MissingTokenError`
+  and the user has to sign in again.
+
+So a store must keep the token for as long as you want the user to stay signed
+in, and must be writable from everywhere the client runs, including background
+jobs.
+
+### Choosing a Store
+
+| Store | Where the token lives | Survives a restart | Shared between processes and servers | Best for |
+|---|---|---|---|---|
+| [ActiveRecord](#activerecord-store) | A row in your database, usually the user | Yes | Yes | Rails apps with a user model, including background jobs |
+| [Redis](#redis-store) | A Redis key | Yes, if Redis persistence is on | Yes | Apps without a suitable model, or tokens not tied to a user |
+| [Dalli](#dalli-store) | A memcached key | No; memcached may also evict it | Yes | Only when an occasional forced sign-in is acceptable |
+| [Session](#session-store) | The user's session | As long as the session lasts | Only within that user's requests | Not recommended; see the warning below |
+| [File](#file-store) | A YAML file on disk | Yes | Same machine only | Command-line tools and scripts |
+| [Memory](#memory-store) | A Ruby object | No | No, not even between store instances | Tests |
+
+Which to use:
+
+- **Rails app where users connect their Procore account:** use the
+  [ActiveRecord store](#activerecord-store) on the user model. The token lives
+  next to the user, survives deploys and is available to background jobs. Use
+  [Active Record encryption](https://guides.rubyonrails.org/active_record_encryption.html)
+  (`encrypts :access_token, :refresh_token`) so tokens aren't stored in plain
+  text.
+- **Background jobs or several app servers, without a model to hold the
+  token** (for example, one integration-wide token): use the
+  [Redis store](#redis-store) with persistence turned on.
+- **Command-line tool or script:** use the [File store](#file-store), so users
+  don't sign in for every command.
+- **Tests:** use the [Memory store](#memory-store).
+- **Avoid** the [Session store](#session-store): the token is unavailable to
+  background jobs, and depending on your session store it may be logged or kept
+  client-side. Use the [Dalli store](#dalli-store) only if losing a token now
+  and then is acceptable, because memcached forgets data on restart and evicts
+  it under memory pressure.
+
+Every built-in store keeps tokens in plain text: as JSON in Redis, memcached and
+the session, as YAML in the File store, and in your table's columns for
+ActiveRecord unless you encrypt them. Protect the storage the way you would a
+password.
+
+The gem doesn't lock around token refresh. If several processes share a token
+and it expires, more than one may refresh it at the same time, and the last
+save wins.
+
 Available stores:
 
 ### Session Store
@@ -437,6 +577,12 @@ unencrypted. Tokens should not be stored client-side if it can be avoided.
 store = Procore::Auth::Stores::Session.new(session: session)
 ```
 
+- **Use it when:** prototyping a web app where every API call happens inside
+  the signed-in user's own requests.
+- **Watch out for:** background jobs can't reach the token. With Rails' default
+  cookie session store, the token travels to and from the browser on every
+  request.
+
 ### Redis Store
 
 Options: `redis`: Instance of Redis
@@ -451,6 +597,12 @@ The key will usually be the id of the current user.
 store = Procore::Auth::Stores::Redis.new(redis: Redis.new, key: current_user.id)
 ```
 
+- **Use it when:** several processes or servers need the token, for example
+  web servers and background jobs, and there's no model to hold it.
+- **Watch out for:** the token is stored under `procore-redis-{key}` with no
+  expiry. It only survives a Redis restart if persistence (RDB or AOF) is on,
+  and an eviction policy such as `allkeys-lru` can remove it.
+
 ### Dalli Store
 
 Options: `dalli`: Instance of Dalli
@@ -461,9 +613,20 @@ There's two required options, `dalli` which is an instance of a Dalli client,
 and `key` which is a unique key which will be used to save / retrieve an access
 token.  The key will usually be the id of the current user.
 
+The store saves tokens as JSON strings, so the client doesn't need Marshal.
+With Dalli 5 or newer, pass `serializer: Dalli::JSONSerializer` to avoid
+deserializing with Marshal and to silence Dalli's security warning.
+
 ```ruby
-store = Procore::Auth::Stores::Dalli.new(dalli: Dalli.new, key: current_user.id)
+dalli = Dalli::Client.new(servers, serializer: Dalli::JSONSerializer)
+store = Procore::Auth::Stores::Dalli.new(dalli: dalli, key: current_user.id)
 ```
+
+- **Use it when:** you already run memcached and users signing in again after
+  a cache restart is acceptable.
+- **Watch out for:** memcached is a cache. A restart clears every token, and
+  under memory pressure it evicts keys, so users are asked to sign in again
+  without warning.
 
 ### ActiveRecord Store
 
@@ -478,6 +641,14 @@ The following columns **must** exist on the model you pass in:
 store = Procore::Auth::Stores::ActiveRecord.new(object: current_user)
 ```
 
+- **Use it when:** tokens belong to a record you already have, usually the
+  user. This is the best default for Rails apps.
+- **Watch out for:** `expires_at` holds a Unix timestamp, so make it an integer
+  column. Encrypt `access_token` and `refresh_token`, for example with
+  `encrypts :access_token, :refresh_token`. Each save runs `update`, so the
+  model's validations and callbacks run too, and if validation fails the new
+  token is silently not saved.
+
 ### File Store
 
 Options: `path`: Path to a file to store access tokens
@@ -491,6 +662,13 @@ authenticate every single command.
 store = Procore::Auth::Stores::File.new(path: "./tokens.yml", key: current_user.id)
 ```
 
+- **Use it when:** building a command-line tool or script that runs on one
+  machine. One file can hold tokens for several keys, and file locking keeps
+  concurrent processes on that machine from corrupting it.
+- **Watch out for:** the file is plain YAML, created with your default
+  permissions, which usually lets every user on the machine read it. Restrict
+  it (`chmod 600 tokens.yml`) and keep it out of version control.
+
 ### Memory Store
 
 Options: `key`: Unique identifier to an access token
@@ -501,6 +679,62 @@ used in tests.
 
 ```ruby
 store = Procore::Auth::Stores::Memory.new(key: current_user.id)
+```
+
+- **Use it when:** writing tests.
+- **Watch out for:** each store instance keeps its own token. A new
+  `Memory.new(key: ...)` with the same key starts empty, so reuse the same
+  instance.
+
+### Custom Stores
+
+Any object can be a store if it responds to three methods:
+
+- `save(token)`: persist a `Procore::Auth::Token`.
+- `fetch`: return the saved `Procore::Auth::Token`, or `nil` if there is none.
+- `delete`: remove the saved token.
+
+The client also logs the store with `to_s`, so define it to identify the store
+without printing the token.
+
+This example keeps tokens in HashiCorp Vault with the
+[vault](https://github.com/hashicorp/vault-ruby) gem:
+
+```ruby
+class VaultStore
+  def initialize(key:)
+    @key = key
+  end
+
+  def save(token)
+    Vault.logical.write("secret/procore/#{@key}", **token_attributes(token))
+  end
+
+  def fetch
+    secret = Vault.logical.read("secret/procore/#{@key}")
+    if secret
+      Procore::Auth::Token.new(**secret.data.slice(:access_token, :refresh_token, :expires_at))
+    end
+  end
+
+  def delete
+    Vault.logical.delete("secret/procore/#{@key}")
+  end
+
+  def to_s
+    "Vault, Key: #{@key}"
+  end
+
+  private
+
+  def token_attributes(token)
+    {
+      access_token: token.access_token,
+      refresh_token: token.refresh_token,
+      expires_at: token.expires_at,
+    }
+  end
+end
 ```
 
 ## Full Example
@@ -559,15 +793,26 @@ To contribute to the gem, please clone the repo and cut a new branch. In the PR,
 
 Please **do not** bump the gem version in your PR. This will be done in a follow up by the gem maintainers.
 
+The repository has pre-commit hooks for secret scanning (Gitleaks), a
+vulnerability audit of `Gemfile.lock` (bundler-audit), and a guard against
+committing directly to `main`. Install them with
+[prek](https://github.com/j178/prek) (or `pre-commit`):
+
+```sh
+prek install --hook-type pre-commit
+```
+
 ## Releasing
 
 Gem maintainer should follow these steps to release a new version:
 
 1. Merge all PRs into the `main` branch that you want included in the release.
-2. Update `version.rb` to a new semantic version, and move unreleased items in `CHANGELOG.md` into a section for that version.
-3. Stage and commit changes. `git commit -a`
-4. Create a tag for the new version. `git tag -a {version}`
-5. Push the tagged commit `git push --follow-tags` and a new version will be published to RubyGems.
+2. Create a release branch from `main`. `git switch -c release-{version}`
+3. Update `version.rb` to a new semantic version, and move unreleased items in `CHANGELOG.md` into a section for that version.
+4. Stage and commit changes. `git commit -a`
+5. Open a PR for the release branch and merge it into `main`. Direct commits to `main` are blocked by the pre-commit hook.
+6. Once the Test workflow passes on `main`, the Release workflow sees the change to `version.rb` and publishes the new version to RubyGems.
+7. Tag the merge commit for the new version. `git switch main && git pull && git tag -a {version} && git push --tags`
 
 ### Tests
 

@@ -27,12 +27,13 @@ module Procore
   #   first_page.pagination[:first]
   #     #=> nil
   #   first_page.pagination[:next]
-  #     #=> "projects?per_page=20&page=2"
+  #     #=> "rest/v1.0/projects?per_page=20&page=2"
   #
-  #   # Any other page will have all keys
+  #   # Any other page will have all keys. The path carries the API version,
+  #   # so #get requests the same version without a version: argument.
   #   next_page = client.get(first_page.pagination[:next])
   #   next_page.pagination[:first]
-  #     #=> "projects?per_page=20&page=1"
+  #     #=> "rest/v1.0/projects?per_page=20&page=1"
   #
   #   # The last page will only have URLs for :first & :next
   #   last_page = client.get(first_page.pagination[:last])
@@ -53,7 +54,7 @@ module Procore
       @pagination = parse_pagination
       @request = request
       @request_body = request_body
-      @raw_body = !body.to_s.empty? ? body : "{}".to_json
+      @raw_body = body.to_s.empty? ? "{}" : body
     end
 
     # @return [Array<Hash>, Hash] Ruby representation of JSON response. Hashes are
@@ -70,9 +71,14 @@ module Procore
       JSON.parse(raw_body, object_class: HashWithIndifferentAccess)
     end
 
+    # Keeps the version segment ("rest/v1.1/..." or "vapid/...") so the
+    # returned path requests the same API version when passed back to #get.
+    LINK = %r{((?:vapid|rest/v\d+\.\d+)/.*?)>; rel="(\w+)"}
+    private_constant :LINK
+
     def parse_pagination
       headers[:link].to_s.split(", ").map(&:strip).reduce({}) do |links, link|
-        url, name = link.match(/(?:vapid|rest\/.*?)\/(.*?)>; rel="(\w+)"/).captures
+        url, name = link.match(LINK).captures
         links.merge!(name.to_sym => url)
       end
     end
